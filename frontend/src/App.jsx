@@ -671,11 +671,58 @@ function ResultScreen({ result, formData, onPlanAnother }) {
   const insights  = AI_INSIGHTS[formData.event_type] ?? AI_INSIGHTS.wedding;
   const checklist = result.required_services.map(s => `Book / arrange — ${s}`);
   const toggleCheck = label => setCheckStates(prev => ({ ...prev, [label]: !prev[label] }));
+  const scrollingRef = useRef(false); // prevent observer firing during programmatic scroll
+
   const scrollToTab = tabId => {
+    scrollingRef.current = true;
     setActiveTab(tabId);
     const el = document.getElementById(`section-${tabId}`);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // Re-enable observer after scroll animation completes (~800ms)
+    setTimeout(() => { scrollingRef.current = false; }, 900);
   };
+
+  /* ── Scroll Spy — auto-highlight tab as user scrolls ── */
+  useEffect(() => {
+    const TAB_IDS = ['services', 'budget', 'timeline', 'checklist', 'vendors'];
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (scrollingRef.current) return; // skip during programmatic scroll
+
+        // Find the entry with the highest intersection ratio that is visible
+        let best = null;
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            if (!best || entry.intersectionRatio > best.intersectionRatio) {
+              best = entry;
+            }
+          }
+        });
+
+        if (best) {
+          const id = best.target.id.replace('section-', '');
+          setActiveTab(id);
+          // Scroll the tab button into view inside the scrollable tab bar
+          const tabBtn = document.getElementById(`tab-btn-${id}`);
+          if (tabBtn) tabBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        }
+      },
+      {
+        // Fire when section crosses 20% visible threshold
+        threshold: [0.1, 0.2, 0.3, 0.4, 0.5],
+        // Shrink the top margin to account for the sticky tab bar (~60px)
+        rootMargin: '-60px 0px -40% 0px',
+      }
+    );
+
+    TAB_IDS.forEach(id => {
+      const el = document.getElementById(`section-${id}`);
+      if (el) observer.observe(el);
+    });
+
+    return () => observer.disconnect();
+  }, []);
 
   /* ── PDF Export ── */
   const exportToPDF = async () => {
@@ -942,6 +989,7 @@ function ResultScreen({ result, formData, onPlanAnother }) {
         <div style={{ display: 'flex', gap: 4, overflowX: 'auto', padding: 4, background: t.tabBg, borderRadius: 14, border: `1px solid ${t.border}`, boxShadow: '0 1px 4px rgba(0,0,0,0.04)', scrollbarWidth: 'none' }}>
           {RESULT_TABS.map(tab => (
             <button key={tab.id}
+              id={`tab-btn-${tab.id}`}
               onClick={() => scrollToTab(tab.id)}
               style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '8px 14px', borderRadius: 10, border: 'none', background: activeTab === tab.id ? t.sectionIcon : 'transparent', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, color: activeTab === tab.id ? t.primary : t.textMuted, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0, transition: 'all 0.18s' }}
             >
