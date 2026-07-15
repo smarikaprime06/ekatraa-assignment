@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext } from 'react';
+import jsPDF from 'jspdf';
 
 /* ══════════════════════════════════════════════════════════
    DARK MODE CONTEXT
@@ -661,8 +662,9 @@ const RESULT_TABS = [
 function ResultScreen({ result, formData, onPlanAnother }) {
   const { dark } = useDark();
   const t = dark ? T.dark : T.light;
-  const [activeTab,   setActiveTab]   = useState('services');
-  const [checkStates, setCheckStates] = useState({});
+  const [activeTab,    setActiveTab]   = useState('services');
+  const [checkStates,  setCheckStates] = useState({});
+  const [exporting,    setExporting]   = useState(false);
 
   const eventType = EVENT_TYPES.find(e => e.value === formData.event_type) ?? EVENT_TYPES[0];
   const vendors   = VENDOR_DATA[formData.event_type] ?? VENDOR_DATA.wedding;
@@ -673,6 +675,230 @@ function ResultScreen({ result, formData, onPlanAnother }) {
     setActiveTab(tabId);
     const el = document.getElementById(`section-${tabId}`);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  /* ── PDF Export ── */
+  const exportToPDF = async () => {
+    setExporting(true);
+    try {
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const margin = 18;
+      const colW = pageW - margin * 2;
+      let y = 0;
+
+      const checkPage = (needed = 14) => {
+        if (y + needed > pageH - 16) { doc.addPage(); y = margin; }
+      };
+
+      // ── Header band
+      doc.setFillColor(163, 77, 18);
+      doc.rect(0, 0, pageW, 36, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(18);
+      doc.setTextColor(255, 255, 255);
+      doc.text('ekatraa', margin, 14);
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.text('AI Event Planner', margin, 20);
+
+      // Event label top-right
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`${eventType.emoji} ${eventType.label} Plan`, pageW - margin, 14, { align: 'right' });
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Generated ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}`, pageW - margin, 20, { align: 'right' });
+
+      y = 44;
+
+      // ── Event meta row
+      doc.setFillColor(253, 245, 239);
+      doc.roundedRect(margin, y, colW, 18, 3, 3, 'F');
+      const meta = [
+        { label: 'City', val: formData.city || 'N/A' },
+        { label: 'Guests', val: Number(formData.guests).toLocaleString('en-IN') },
+        { label: 'Budget', val: `Rs.${Number(formData.budget).toLocaleString('en-IN')}` },
+        { label: 'Date', val: new Date(formData.event_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) },
+      ];
+      const metaCellW = colW / meta.length;
+      meta.forEach((m, i) => {
+        const cx = margin + i * metaCellW + metaCellW / 2;
+        doc.setFontSize(7); doc.setTextColor(107, 114, 128); doc.setFont('helvetica', 'normal');
+        doc.text(m.label.toUpperCase(), cx, y + 6, { align: 'center' });
+        doc.setFontSize(9); doc.setTextColor(34, 34, 34); doc.setFont('helvetica', 'bold');
+        doc.text(m.val, cx, y + 13, { align: 'center' });
+      });
+      y += 26;
+
+      // ── Section helper
+      const sectionTitle = (title) => {
+        checkPage(14);
+        doc.setFillColor(241, 90, 36);
+        doc.rect(margin, y, 3, 8, 'F');
+        doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(34, 34, 34);
+        doc.text(title, margin + 6, y + 6);
+        y += 13;
+      };
+
+      const divider = () => {
+        doc.setDrawColor(236, 236, 236);
+        doc.line(margin, y, pageW - margin, y);
+        y += 6;
+      };
+
+      // ── 1. Required Services
+      sectionTitle('Required Services');
+      const services = result.required_services;
+      let sx = margin;
+      services.forEach((svc, i) => {
+        const icon = SERVICE_ICONS[svc] ?? '•';
+        const label = `${icon} ${svc}`;
+        const tw = doc.getTextWidth(label) + 8;
+        if (sx + tw > pageW - margin) { sx = margin; y += 10; checkPage(10); }
+        doc.setFillColor(253, 245, 239);
+        doc.roundedRect(sx, y - 5, tw, 8, 2, 2, 'F');
+        doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(34, 34, 34);
+        doc.text(label, sx + 4, y + 0.5);
+        sx += tw + 4;
+      });
+      y += 14;
+      divider();
+
+      // ── 2. Budget Distribution
+      sectionTitle('Budget Distribution');
+      doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(107, 114, 128);
+      doc.text(`Total: Rs.${Number(formData.budget).toLocaleString('en-IN')}`, pageW - margin, y - 5, { align: 'right' });
+
+      result.budget_distribution.forEach(item => {
+        checkPage(14);
+        doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(34, 34, 34);
+        doc.text(item.category, margin, y);
+        doc.setFont('helvetica', 'bold'); doc.setTextColor(163, 77, 18);
+        doc.text(`Rs.${item.allocated.toLocaleString('en-IN')} (${item.percentage}%)`, pageW - margin, y, { align: 'right' });
+        // bar track
+        doc.setFillColor(240, 235, 230);
+        doc.roundedRect(margin, y + 2, colW, 4, 1, 1, 'F');
+        // bar fill
+        doc.setFillColor(163, 77, 18);
+        doc.roundedRect(margin, y + 2, colW * item.percentage / 100, 4, 1, 1, 'F');
+        y += 13;
+      });
+      y += 4;
+      divider();
+
+      // ── 3. Timeline
+      if (result.timeline?.length > 0) {
+        sectionTitle('Event Timeline');
+        result.timeline.forEach((item, i) => {
+          checkPage(12);
+          const eventDate = new Date(formData.event_date);
+          const itemDate  = new Date(item.date);
+          const daysLeft  = Math.ceil((eventDate - itemDate) / 86400000);
+          const dateLabel = new Date(item.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+          // dot
+          doc.setFillColor(163, 77, 18);
+          doc.circle(margin + 2, y - 1, 2, 'F');
+          // connector line
+          if (i < result.timeline.length - 1) {
+            doc.setDrawColor(163, 77, 18, 0.3);
+            doc.line(margin + 2, y + 1, margin + 2, y + 11);
+          }
+          doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(163, 77, 18);
+          doc.text(daysLeft > 0 ? `${daysLeft} days before` : 'Event Day', margin + 8, y);
+          doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(34, 34, 34);
+          doc.text(item.task, margin + 8, y + 5);
+          doc.setFontSize(7); doc.setTextColor(156, 163, 175);
+          doc.text(dateLabel, margin + 8, y + 9.5);
+          y += 14;
+        });
+        // Event day cap
+        checkPage(12);
+        doc.setFillColor(253, 186, 59);
+        doc.circle(margin + 2, y - 1, 2, 'F');
+        doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(146, 102, 10);
+        doc.text('EVENT DAY', margin + 8, y);
+        doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(34, 34, 34);
+        doc.text(
+          `${eventType.label} — ${new Date(formData.event_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}`,
+          margin + 8, y + 5
+        );
+        y += 18;
+        divider();
+      }
+
+      // ── 4. Checklist
+      sectionTitle('Event Checklist');
+      checklist.forEach(label => {
+        checkPage(9);
+        doc.setDrawColor(200, 200, 200);
+        doc.roundedRect(margin, y - 4.5, 5, 5, 1, 1);
+        doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(34, 34, 34);
+        doc.text(label, margin + 8, y);
+        y += 9;
+      });
+      y += 4;
+      divider();
+
+      // ── 5. Suggested Vendors
+      sectionTitle('Suggested Vendors');
+      vendors.forEach(v => {
+        checkPage(16);
+        doc.setFillColor(250, 250, 250);
+        doc.roundedRect(margin, y - 4, colW, 14, 2, 2, 'F');
+        doc.setDrawColor(236, 236, 236);
+        doc.roundedRect(margin, y - 4, colW, 14, 2, 2);
+        // Avatar
+        doc.setFillColor(163, 77, 18);
+        doc.roundedRect(margin + 3, y - 1, 8, 8, 1, 1, 'F');
+        doc.setFontSize(6); doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold');
+        doc.text(v.name[0], margin + 7, y + 4.5, { align: 'center' });
+        // Name & category
+        doc.setFontSize(9); doc.setTextColor(34, 34, 34); doc.setFont('helvetica', 'bold');
+        doc.text(v.name, margin + 14, y + 1.5);
+        doc.setFontSize(7); doc.setTextColor(156, 163, 175); doc.setFont('helvetica', 'normal');
+        doc.text(v.category, margin + 14, y + 6.5);
+        // Rating
+        doc.setFontSize(7); doc.setTextColor(107, 114, 128);
+        doc.text(`★ ${v.rating}`, margin + 14, y + 11);
+        // Price
+        doc.setFontSize(8); doc.setTextColor(163, 77, 18); doc.setFont('helvetica', 'bold');
+        doc.text(v.price, pageW - margin - 3, y + 4, { align: 'right' });
+        y += 18;
+      });
+      divider();
+
+      // ── 6. AI Suggestions
+      sectionTitle('AI Suggestions');
+      insights.forEach(tip => {
+        checkPage(10);
+        doc.setFillColor(163, 77, 18);
+        doc.circle(margin + 1.5, y - 1.5, 1.5, 'F');
+        doc.setFontSize(8.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(34, 34, 34);
+        const lines = doc.splitTextToSize(tip, colW - 8);
+        doc.text(lines, margin + 6, y);
+        y += lines.length * 5 + 5;
+      });
+
+      // ── Footer on every page
+      const totalPages = doc.internal.getNumberOfPages();
+      for (let p = 1; p <= totalPages; p++) {
+        doc.setPage(p);
+        doc.setFillColor(248, 245, 242);
+        doc.rect(0, pageH - 10, pageW, 10, 'F');
+        doc.setFontSize(7); doc.setTextColor(156, 163, 175); doc.setFont('helvetica', 'normal');
+        doc.text('Generated by Ekatraa AI Event Planner · ekatraa-api.onrender.com', margin, pageH - 3.5);
+        doc.text(`Page ${p} of ${totalPages}`, pageW - margin, pageH - 3.5, { align: 'right' });
+      }
+
+      const filename = `Ekatraa_${eventType.label}_Plan_${formData.event_date}.pdf`;
+      doc.save(filename);
+    } catch (err) {
+      console.error('PDF export failed:', err);
+      alert('PDF export failed. Please try again.');
+    }
+    setExporting(false);
   };
 
   return (
@@ -872,9 +1098,24 @@ function ResultScreen({ result, formData, onPlanAnother }) {
 
           {/* Bottom Actions */}
           <div className="anim-fade-up delay-350" style={{ paddingTop: 4, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <button id="export-plan-btn" className="ek-btn-primary" disabled style={{ opacity: 0.45, cursor: 'not-allowed' }}>
-              <Icon d={IC.share} size={17} style={{ color: '#fff' }} />
-              Export Plan
+            <button
+              id="export-plan-btn"
+              className="ek-btn-primary"
+              onClick={exportToPDF}
+              disabled={exporting}
+              style={exporting ? { opacity: 0.7, cursor: 'wait' } : {}}
+            >
+              {exporting ? (
+                <>
+                  <span style={{ width: 17, height: 17, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.75s linear infinite' }} />
+                  Generating PDF…
+                </>
+              ) : (
+                <>
+                  <Icon d={IC.share} size={17} style={{ color: '#fff' }} />
+                  Export Plan as PDF
+                </>
+              )}
             </button>
             <button id="plan-another-btn" className="ek-btn-outline" onClick={onPlanAnother}>
               <Icon d={IC.arrowL} size={17} style={{ color: '#A34D12' }} />
