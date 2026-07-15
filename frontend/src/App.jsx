@@ -928,7 +928,7 @@ export default function App() {
     setLoading(true);
     setScreen('result');
     try {
-      const response = await fetch('http://localhost:8000/api/v1/predict-plan', {
+      const response = await fetch('https://ekatraa-api.onrender.com/api/v1/predict-plan', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(formData),
