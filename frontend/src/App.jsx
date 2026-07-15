@@ -309,26 +309,28 @@ function BudgetOptimizer({ budgetDistribution, totalBudget }) {
   const { dark } = useDark();
   const t = dark ? T.dark : T.light;
 
-  // Find the venue/hall category (first category that contains "Venue" or "Hall")
-  const venueIdx = budgetDistribution.findIndex(
-    item => /venue|hall/i.test(item.category)
-  );
-  if (venueIdx === -1) return null; // no venue category — skip
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const selectedItem = budgetDistribution[selectedIdx];
+  const [sliderPct, setSliderPct] = useState(selectedItem?.percentage || 0);
 
-  const venueItem = budgetDistribution[venueIdx];
-  const [sliderPct, setSliderPct] = useState(venueItem.percentage);
+  // Sync slider when category changes
+  useEffect(() => {
+    if (selectedItem) setSliderPct(selectedItem.percentage);
+  }, [selectedIdx, selectedItem]);
 
-  // How much was saved from the original venue allocation
-  const savedPct  = venueItem.percentage - sliderPct;
+  if (!budgetDistribution || budgetDistribution.length === 0) return null;
+
+  // How much was saved from the original allocation
+  const savedPct  = selectedItem.percentage - sliderPct;
   const savedAmt  = Math.round(totalBudget * savedPct / 100);
 
   // Redistribute savings proportionally across all OTHER categories
   const otherTotal = budgetDistribution
-    .filter((_, i) => i !== venueIdx)
+    .filter((_, i) => i !== selectedIdx)
     .reduce((s, item) => s + item.percentage, 0);
 
   const optimized = budgetDistribution.map((item, i) => {
-    if (i === venueIdx) {
+    if (i === selectedIdx) {
       return { ...item, percentage: sliderPct, allocated: Math.round(totalBudget * sliderPct / 100) };
     }
     const extra = otherTotal > 0 ? (item.percentage / otherTotal) * savedPct : 0;
@@ -336,7 +338,7 @@ function BudgetOptimizer({ budgetDistribution, totalBudget }) {
     return { ...item, percentage: Math.round(newPct), allocated: Math.round(totalBudget * newPct / 100) };
   });
 
-  const isModified = sliderPct < venueItem.percentage;
+  const isModified = sliderPct < selectedItem.percentage;
 
   return (
     <div style={{ marginTop: 20, padding: 16, background: t.optimizerBg, borderRadius: 14, border: `1px solid ${t.optimizerBr}` }}>
@@ -352,14 +354,27 @@ function BudgetOptimizer({ budgetDistribution, totalBudget }) {
       </div>
 
       <p style={{ margin: '0 0 14px', fontSize: 12, color: t.textSec, lineHeight: 1.55 }}>
-        Drag the slider to reduce <strong style={{ color: t.text }}>{venueItem.category}</strong> cost.
+        Select a category and drag the slider to reduce costs.
         Savings are automatically redistributed across other categories.
       </p>
+
+      {/* Category Selector */}
+      <div style={{ marginBottom: 14 }}>
+        <select
+          value={selectedIdx}
+          onChange={e => setSelectedIdx(Number(e.target.value))}
+          style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: `1px solid ${t.optimizerBr}`, background: t.surface, color: t.text, fontSize: 13, fontWeight: 600, outline: 'none', appearance: 'none', cursor: 'pointer' }}
+        >
+          {budgetDistribution.map((item, i) => (
+            <option key={i} value={i}>{item.category} (Current: {item.percentage}%)</option>
+          ))}
+        </select>
+      </div>
 
       {/* Slider */}
       <div style={{ marginBottom: 14 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <span style={{ fontSize: 12, color: t.textSec, fontWeight: 600 }}>Venue allocation</span>
+          <span style={{ fontSize: 12, color: t.textSec, fontWeight: 600 }}>{selectedItem.category} allocation</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: t.primary }}>{sliderPct}%</span>
             <span style={{ fontSize: 12, color: t.textMuted }}>
@@ -369,10 +384,10 @@ function BudgetOptimizer({ budgetDistribution, totalBudget }) {
         </div>
 
         <input
-          id="venue-optimizer-slider"
+          id="optimizer-slider"
           type="range"
           min={5}
-          max={venueItem.percentage}
+          max={selectedItem.percentage}
           value={sliderPct}
           onChange={e => setSliderPct(Number(e.target.value))}
           style={{
@@ -384,7 +399,7 @@ function BudgetOptimizer({ budgetDistribution, totalBudget }) {
         />
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: t.textMuted, marginTop: 4 }}>
           <span>5% (min)</span>
-          <span>{venueItem.percentage}% (original)</span>
+          <span>{selectedItem.percentage}% (original)</span>
         </div>
       </div>
 
@@ -394,11 +409,11 @@ function BudgetOptimizer({ budgetDistribution, totalBudget }) {
           {isModified ? 'Redistributed allocation:' : 'Adjust slider to see redistribution'}
         </p>
         {optimized.map((item, i) => {
-          const isVenue   = i === venueIdx;
-          const increased = !isVenue && isModified;
+          const isSelected = i === selectedIdx;
+          const increased = !isSelected && isModified;
           return (
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-              <span style={{ fontSize: 12, color: t.text, flex: 1, fontWeight: isVenue ? 700 : 400 }}>
+              <span style={{ fontSize: 12, color: t.text, flex: 1, fontWeight: isSelected ? 700 : 400 }}>
                 {item.category}
               </span>
               <span style={{ fontSize: 11, color: t.textMuted, minWidth: 30, textAlign: 'right' }}>
@@ -407,7 +422,7 @@ function BudgetOptimizer({ budgetDistribution, totalBudget }) {
               {increased && (
                 <span style={{ fontSize: 10, color: t.savingsTxt, fontWeight: 700 }}>▲</span>
               )}
-              {isVenue && isModified && (
+              {isSelected && isModified && (
                 <span style={{ fontSize: 10, color: '#EF4444', fontWeight: 700 }}>▼</span>
               )}
               <span style={{ fontSize: 12, fontWeight: 700, color: t.primary, minWidth: 80, textAlign: 'right' }}>
@@ -421,7 +436,7 @@ function BudgetOptimizer({ budgetDistribution, totalBudget }) {
       {/* Reset */}
       {isModified && (
         <button
-          onClick={() => setSliderPct(venueItem.percentage)}
+          onClick={() => setSliderPct(selectedItem.percentage)}
           style={{ marginTop: 12, fontSize: 12, color: t.textSec, background: 'transparent', border: 'none', cursor: 'pointer', textDecoration: 'underline', fontFamily: 'inherit', padding: 0 }}
         >
           Reset to original
@@ -982,6 +997,16 @@ function ResultScreen({ result, formData, onPlanAnother }) {
             </span>
           ))}
         </div>
+
+        {/* Additional Requirements Display */}
+        {formData.additional_requirements && (
+          <div className="anim-fade-up delay-100" style={{ marginTop: 16, padding: '12px 14px', background: 'rgba(255,255,255,0.1)', borderRadius: 12, border: '1px dashed rgba(255,255,255,0.25)', position: 'relative', zIndex: 1, fontSize: 13, color: '#FFFFFF' }}>
+            <strong style={{ display: 'block', marginBottom: 6, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, opacity: 0.85 }}>Additional Requirements</strong>
+            <div style={{ lineHeight: 1.5, opacity: 0.95, whiteSpace: 'pre-wrap' }}>
+              {formData.additional_requirements}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Sticky Tab Bar */}
